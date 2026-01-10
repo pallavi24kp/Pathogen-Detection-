@@ -1,0 +1,13 @@
+Malaria is a life-threatening disease caused by parasites of the Plasmodium species, which are transmitted to people through the bites of infected female Anopheles mosquitoes. It is a preventable and curable disease.
+
+Symptoms of Malaria:
+The most common early symptoms of malaria are fever, headache, and chills. These symptoms usually appear 10–15 days after the infective mosquito bite. The symptoms can be mild and difficult to recognize as malaria. If not treated within 24 hours, P. falciparum malaria can progress to severe illness, often leading to death. Children with severe malaria frequently develop one or more of the following symptoms: severe anaemia, respiratory distress in relation to metabolic acidosis, or cerebral malaria.
+
+Causes and Transmission:
+Malaria is caused by a single-celled parasite of the genus Plasmodium. The parasite is transmitted to humans most commonly through mosquito bites. Because the parasites that cause malaria affect red blood cells, people can also get malaria from exposure to infected blood, including from mother to unborn child, through blood transfusions, and by sharing needles used to inject drugs.
+
+Prevention of Malaria:
+Vector control is the main way to prevent and reduce malaria transmission. This involves using mosquito nets treated with insecticide and indoor residual spraying. WHO recommends that all people at risk of malaria sleep under an insecticide-treated net. Preventive chemotherapy is another key strategy, involving the use of antimalarial medicines to prevent infections. For travelers, antimalarial drugs can be taken to prevent the disease.
+
+Diagnosis and Treatment:
+Early diagnosis and treatment of malaria reduces disease, prevents deaths and contributes to reducing malaria transmission. WHO recommends that all suspected cases of malaria be confirmed using parasite-based diagnostic testing (either microscopy or a rapid diagnostic test). Treatment, particularly for P. falciparum malaria, should be started as soon as possible. The best available treatment is artemisinin-based combination therapy (ACT).

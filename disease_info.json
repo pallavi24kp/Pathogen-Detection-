@@ -1,0 +1,74 @@
+{
+  "malaria": {
+    "model_path": "malaria_detection_model.h5",
+    "labels": ["Parasitized", "Uninfected"],
+  "preprocess": "scale",
+  "invert_binary": false,
+    "class_info": {
+      "Parasitized": {
+        "disease": "Malaria",
+        "pathogen": "Plasmodium vivax",
+        "notes": "Artemisinin-based combination therapies (ACTs) are commonly used."
+      },
+      "Uninfected": {
+        "disease": "Healthy",
+        "pathogen": "None",
+        "notes": "No infection detected."
+      }
+    }
+  },
+  "dna_classifier": {
+    "model_path": "dna_kmer_classifier_model.h5",
+    "tokenizer_path": "tokenizer.pkl",
+    "label_encoder_path": "label_encoder.pkl",
+    "type": "dna",
+    "display_name": "DNA Sequence Classifier",
+    "labels": [],
+    "class_info": {
+      "hpv": {
+        "disease": "Human Papillomavirus",
+        "pathogen": "HPV",
+        "notes": "Detected Human Papillomavirus sequence."
+      },
+      "human_smaco": {
+        "disease": "Human Smacovirus",
+        "pathogen": "Smacovirus",
+        "notes": "Detected Human Smacovirus sequence."
+      },
+      "human_parvo": {
+        "disease": "Human Parvovirus",
+        "pathogen": "Parvovirus B19",
+        "notes": "Detected Human Parvovirus sequence."
+      },
+      "JC_polyoma": {
+        "disease": "JC Polyomavirus",
+        "pathogen": "JC virus",
+        "notes": "Detected JC Polyomavirus sequence."
+      },
+      "E_coli": {
+        "disease": "Escherichia coli",
+        "pathogen": "E. coli",
+        "notes": "Detected Escherichia coli sequence."
+      }
+    }
+  },
+  "chest_xray": {
+  "model_path": "tb_detection_model.h5",
+    "labels": ["Tuberculosis", "Normal"],
+    "preprocess": "scale",
+    "invert_binary": true,
+    "thresholds": { "Tuberculosis": 0.4 },
+    "class_info": {
+      "Tuberculosis": {
+        "disease": "Tuberculosis",
+        "pathogen": "Mycobacterium tuberculosis",
+        "notes": "Suggest confirmatory microbiological testing (e.g., sputum smear/GeneXpert). Refer to TB treatment guidelines."
+      },
+      "Normal": {
+        "disease": "Healthy",
+        "pathogen": "None",
+        "notes": "No apparent signs of TB on the chest X-ray. Clinical correlation recommended."
+      }
+    }
+  }
+}

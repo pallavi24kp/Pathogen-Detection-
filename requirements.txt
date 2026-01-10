@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+tensorflow
+pillow
+numpy
+python-multipart
+google-generativeai
+python-dotenv
+duckduckgo-search
+beautifulsoup4

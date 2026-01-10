@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>LabAssist — Multi-Modal Diagnostic</title>
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header>
+    <h1>🧬 LabAssist</h1>
+    <nav>
+      <button id="nav-home">Home</button>
+      <button id="nav-upload">Upload / Input</button>
+      <button id="nav-history">History</button>
+    </nav>
+  </header>
+
+  <main id="main">
+
+    <section id="page-home" class="page">
+              </div>
+        <div>
+          <h1 class="gradient-heading">Precision <span>Pathogen Diagnostics</span></h1>
+           <p class="home-lead">Therapeutics discovery and lab experiment-driven CRISPR discovery. Leverage our multi-modal diagnostic analysis for rapid pathogen identification and treatment guidance.</p>
+      <div class="home-align-wrapper">
+          <div class="card home-hero">
+            <div class="dna-graphic"></div>
+            <div class="home-hero-content">
+              <h2>Start Your Analysis</h2>
+              <p>Upload microscopy images or DNA sequence files for comprehensive pathogen analysis. Our advanced multi-modal system provides accurate identification and treatment recommendations.</p>
+              <div class="home-actions">
+                <button id="goto-upload" class="primary">Start Analysis <span style="font-size:1.2em;">&#8594;</span></button>
+                <button id="dna-upload-shortcut" class="secondary"><span style="font-size:1.2em;">&#9881;</span> Upload DNA</button>
+                <button id="image-upload-shortcut" class="secondary"><span style="font-size:1.2em;">&#128247;</span> Upload Image</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="feature-cards">
+          <div class="feature-card">
+            <div class="feature-icon">&#8679;</div>
+            <h3>Multi-Modal Input</h3>
+            <p>Support for microscopy images and DNA/RNA sequence files in various formats.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">&#128300;</div>
+            <h3>Advanced Analysis</h3>
+            <p>AI-powered pathogen detection with high accuracy and detailed visual annotations.</p>
+          </div>
+          <div class="feature-card">
+            <div class="feature-icon">&#128209;</div>
+            <h3>Treatment Guidance</h3>
+            <p>Receive evidence-based treatment recommendations based on identified pathogens.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-upload" class="page hidden">
+      <h2>Upload Sample Data</h2>
+      <div class="upload-grid">
+        <div class="card upload-card">
+          <h3>🔬 Microscopy Image</h3>
+          <input type="file" id="imageFile" accept="image/*" />
+          <p class="hint">Upload a blood cell or tissue image (PNG/JPG).</p>
+        </div>
+        <div class="card upload-card">
+          <h3>🧬 DNA / Sequence File</h3>
+          <input type="file" id="dnaFile" accept=".fasta,.fastq,.fna" />
+          <p class="hint">Upload FASTA/FASTQ/FNA sequence data.</p>
+        </div>
+      </div>
+
+      <div class="card controls-card">
+        <h3>Analysis Configuration</h3>
+        <div class="actions">
+          <button id="analyzeBtn">Analyze</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="page-processing" class="page hidden">
+      <h2>Processing Sample Data</h2>
+      <div id="progressLog" class="card">
+        <div class="progress-bar"><div id="progressFill" style="width:0%"></div></div>
+        <pre id="statusText">Waiting to start...</pre>
+      </div>
+      <div class="actions">
+        <button id="abortBtn">Abort Analysis</button>
+      </div>
+    </section>
+
+    <section id="page-results" class="page hidden">
+      <h2>Analysis Results</h2>
+      <div id="resultsContainer">
+        <div class="card result-section">
+          <h3>Detection & Probability</h3>
+          <p id="result-detection">Detection: **Pathogen Detected** (98.5% Probability)</p>
+          <p id="result-label">Identified Pathogen: *Plasmodium falciparum*</p>
+        </div>
+
+        <div class="card result-section">
+          <h3>Image Analysis</h3>
+          <p>Bounding boxes show infected cells. </p>
+          <div id="image-view"></div>
+        </div>
+
+        <div class="card result-section">
+          <h3>DNA Analysis</h3>
+          <p>Highlighted regions indicate pathogen match.</p>
+          <div id="dna-match-regions"></div>
+        </div>
+
+      </div>
+      <div class="actions">
+        <button id="downloadReport">Download Full Report</button>
+        <button id="backToUpload">Start New Analysis</button>
+      </div>
+    </section>
+
+    <section id="page-history" class="page hidden">
+      <h2>History / Reports</h2>
+      <div class="history-actions">
+        <button id="clearHistoryBtn">Clear All History</button>
+      </div>
+      <ul id="historyList"></ul>
+    </section>
+  </main>
+
+  <div id="chatIcon">💬</div>
+
+  <div id="chatModal" class="hidden">
+    <div class="chatWindow">
+      <header>Assistant <button id="closeChat">✖</button></header>
+      <div id="chatLog"></div>
+      <div class="chatInput">
+        <input id="chatPrompt" placeholder="Ask about the results or diseases..." />
+        <button id="sendChat">Send</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
