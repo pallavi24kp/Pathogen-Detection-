@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+ENV/
+
+# VS Code
+.vscode/
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+
+# Byte-compiled / optimized
+*.pyc
+
+# Virtualenv
+.venv/
+
+# model checkpoints (if you want to keep yours out of repo)
+.venv/
+venv310/
+__pycache__/
+nul
+.vscode/
+*.h5
+*.pkl
