@@ -4,10 +4,9 @@ __pycache__/
 *.pyo
 *.pyd
 .Python
-env/
-venv/
-.venv/
-ENV/
+
+
+
 
 # VS Code
 .vscode/
@@ -25,8 +24,7 @@ ENV/
 .venv/
 
 # model checkpoints (if you want to keep yours out of repo)
-.venv/
-venv310/
+
 __pycache__/
 nul
 .vscode/
