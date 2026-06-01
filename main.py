@@ -17,6 +17,13 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from dotenv import load_dotenv
 import asyncio
 from rag_tools import search_web
+import pickle
+
+class CustomUnpickler(pickle.Unpickler):
+    def find_class(self, module, name):
+        if 'keras.src.legacy' in module:
+            module = module.replace('keras.src.legacy', 'keras')
+        return super().find_class(module, name)
 
 app = FastAPI(title="Malaria Detection API")
 
@@ -121,52 +128,41 @@ def map_label_to_disease(label_name: Optional[str], label_id: Optional[int], lab
     """Map a predicted label (name or id) to the `disease_info` mapping.
     Returns a dict with keys:
       - info: {disease, pathogen}
-      - matched_key: the key in `disease_info` that matched (or None)
-    The lookup is tolerant: exact match, case-insensitive match, then fallback to labels[label_id].
+      - matched_key: the key in the model's class_info that matched (or None)
+    The lookup is tolerant: checks for exact match or case-insensitive match in all configured models.
     """
     info = {"disease": "Unknown", "pathogen": "Unknown"}
     matched = None
     try:
-        lookup_key = None
+        lookup_keys = []
         if label_name is not None:
-            norm = label_name.strip()
-            lookup_key = norm
-            # Try direct match first
-            if lookup_key in disease_info:
-                info = disease_info[lookup_key]
-                matched = lookup_key
-            else:
-                # Use casefold-based matching for better unicode handling
-                folded = lookup_key.casefold()
-                if folded in disease_info_key_map:
-                    matched = disease_info_key_map[folded]
-                    info = disease_info[matched]
-                else:
-                    # last-ditch: try simple lowercase compare
-                    lower_lookup = lookup_key.lower()
-                    for k in disease_info.keys():
-                        if k.lower() == lower_lookup:
-                            matched = k
-                            info = disease_info[k]
-                            break
+            lookup_keys.append(label_name.strip())
+        if label_id is not None and labels and label_id < len(labels):
+            lookup_keys.append(labels[label_id].strip())
 
-        # fallback to labels[label_id] if available
-        if matched is None and label_id is not None and labels:
-            try:
-                fallback_label = labels[label_id]
-                if fallback_label in disease_info:
-                    info = disease_info[fallback_label]
-                    matched = fallback_label
-                else:
-                    fb_lower = fallback_label.lower()
-                    for k in disease_info.keys():
-                        if k.lower() == fb_lower:
-                            info = disease_info[k]
-                            matched = k
-                            break
-            except Exception:
-                pass
-    except Exception:
+        # Iterate over all models in disease_info
+        for model_key, model_data in disease_info.items():
+            if not isinstance(model_data, dict):
+                continue
+            class_info = model_data.get('class_info', {})
+            for key in lookup_keys:
+                # Direct match
+                if key in class_info:
+                    info = class_info[key]
+                    matched = key
+                    break
+                # Case-insensitive match
+                for class_label, class_data in class_info.items():
+                    if class_label.lower() == key.lower():
+                        info = class_data
+                        matched = class_label
+                        break
+                if matched:
+                    break
+            if matched:
+                break
+    except Exception as e:
+        print(f"Error mapping label to disease: {e}")
         info = {"disease": "Unknown", "pathogen": "Unknown"}
         matched = None
 
@@ -287,10 +283,17 @@ async def chat_endpoint(req: ChatRequest):
                         await asyncio.sleep(0.02)
 
             except Exception as e:
-                error_message = f"Error during Gemini API call: {e}"
-                print(error_message)
+                print(f"Error during Gemini API call: {e}")
                 traceback.print_exc()
-                yield error_message.encode('utf-8')
+                warning = "⚠️ Note: Gemini API quota exceeded or connection failed. Falling back to local offline assistant.\n\n"
+                yield warning.encode('utf-8')
+                
+                mock_text = f"Hello! As the cloud-based Gemini Assistant is currently unavailable (rate-limited or offline), I am running in offline mode.\n\nRegarding your query: '{prompt}'\n\nFor general clinical guidance, please refer to the knowledge base or consult a specialist. LabAssist is ready to accept microscopy images (malaria thin smears, TB chest X-rays) or DNA sequences for automated diagnostic classification."
+                chunk_size = 15
+                for i in range(0, len(mock_text), chunk_size):
+                    chunk = mock_text[i : i + chunk_size]
+                    await asyncio.sleep(0.04)
+                    yield chunk.encode("utf-8")
 
         return StreamingResponse(stream_generator(), media_type="text/plain; charset=utf-8")
 
@@ -895,7 +898,7 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
                 return JSONResponse(content={"error": f"DNA analysis failed: {dna_pred['error']}"}, status_code=500)
             # Build JSON result for frontend
             result = {
-                "detection": "DETECTED" if dna_pred.get('label', '').lower() == 'pathogenic' else "NOT DETECTED",
+                "detection": "DETECTED" if dna_pred.get('label', '').lower() not in ('human', 'healthy', 'normal', 'none', 'unknown') else "NOT DETECTED",
                 "label": dna_pred.get('label', 'Unknown'),
                 "probability": f"{max(dna_pred.get('probabilities', [0]))*100:.2f}%",
                 "disease": dna_pred.get('disease', 'Unknown'),
@@ -917,6 +920,24 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
             src_image = Image.open(io.BytesIO(contents)).convert('RGB')
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid image file")
+
+        # Convert contents to base64 for returning in summary (resized slightly to save space)
+        import base64
+        try:
+            img_byte_arr = io.BytesIO()
+            max_size = 500
+            if src_image.width > max_size or src_image.height > max_size:
+                # create a copy to avoid mutating the original image used for prediction
+                thumb = src_image.copy()
+                thumb.thumbnail((max_size, max_size))
+                thumb.save(img_byte_arr, format='JPEG', quality=80)
+            else:
+                src_image.save(img_byte_arr, format='JPEG', quality=80)
+            encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+            image_url = f"data:image/jpeg;base64,{encoded_image}"
+        except Exception as encode_err:
+            print(f"Error encoding image to base64: {encode_err}")
+            image_url = None
 
         # Reload disease_info.json
         try:
@@ -990,7 +1011,7 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
             else:
                 # DNA model detection logic
                 if first.get('type') == 'dna' or (summary_key and 'dna' in summary_key):
-                    if label.lower() == 'pathogenic':
+                    if label and label.lower() not in ('human', 'healthy', 'normal', 'none', 'unknown'):
                         detection = 'DETECTED'
                 # Image model detection logic
                 else:
@@ -1028,7 +1049,8 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
                 'preprocess_used': first.get('preprocess_used'),
                 'notes': first.get('notes') or '',
                 'status': 'error' if is_error else 'success',
-                'error': first.get('error') if is_error else None
+                'error': first.get('error') if is_error else None,
+                'image_url': image_url if (image_file or file) else None
             }
 
     # Return both a legacy-friendly `results` summary and the full detailed results
@@ -1041,74 +1063,93 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
 
 
 
-def dna_preprocess_and_predict(dna_sequence: str, model_info: Dict[str, Any]) -> Dict[str, Any]:
-    def sliding_window_dna_analysis(dna_sequence: str, model_info: Dict[str, Any], window_size: int = 200, step_size: int = 50):
-        """Analyze DNA using sliding windows, aggregate pathogen predictions."""
-        import pickle
-        import tensorflow as tf
-        from keras.preprocessing.sequence import pad_sequences
-        import numpy as np
+def sliding_window_dna_analysis(dna_sequence: str, model_info: Dict[str, Any], window_size: int = 200, step_size: int = 50):
+    """Analyze DNA using sliding windows, aggregate pathogen predictions."""
+    import pickle
+    import tensorflow as tf
+    from keras.preprocessing.sequence import pad_sequences
+    import numpy as np
 
-        base_dir = os.path.dirname(__file__)
-        tokenizer_cfg = model_info.get('tokenizer_path')
-        le_cfg = model_info.get('label_encoder_path')
-        model_cfg = model_info.get('model_path')
-        tokenizer_path = os.path.join(base_dir, tokenizer_cfg) if tokenizer_cfg else None
-        le_path = os.path.join(base_dir, le_cfg) if le_cfg else None
-        model_path = os.path.join(base_dir, model_cfg) if model_cfg else None
+    base_dir = os.path.dirname(__file__)
+    tokenizer_cfg = model_info.get('tokenizer_path')
+    le_cfg = model_info.get('label_encoder_path')
+    model_cfg = model_info.get('model_path')
+    tokenizer_path = os.path.join(base_dir, tokenizer_cfg) if tokenizer_cfg else None
+    le_path = os.path.join(base_dir, le_cfg) if le_cfg else None
+    model_path = os.path.join(base_dir, model_cfg) if model_cfg else None
 
-        with open(tokenizer_path, 'rb') as f:
-            tokenizer = pickle.load(f)
-        with open(le_path, 'rb') as f:
-            label_encoder = pickle.load(f)
-        if model_path in models_cache:
-            model = models_cache[model_path]
+    with open(tokenizer_path, 'rb') as f:
+        tokenizer = CustomUnpickler(f).load()
+    with open(le_path, 'rb') as f:
+        label_encoder = CustomUnpickler(f).load()
+    if model_path in models_cache:
+        model = models_cache[model_path]
+    else:
+        model = tf.keras.models.load_model(model_path, compile=False)
+        models_cache[model_path] = model
+
+    seq = dna_sequence.strip().upper()
+    windows = [seq[i:i+window_size] for i in range(0, len(seq)-window_size+1, step_size)]
+    if not windows:
+        windows = [seq]
+
+    total_windows = len(windows)
+    
+    # 1. Pre-generate all kmers strings for windows
+    all_window_kmers = []
+    for window in windows:
+        kmers = [window[j:j+6] for j in range(len(window)-5)] if len(window) >= 6 else [window]
+        all_window_kmers.append(" ".join(kmers))
+
+    # 2. Map all sequences to tokens in one go
+    if hasattr(tokenizer, 'texts_to_sequences'):
+        sequences = tokenizer.texts_to_sequences(all_window_kmers)
+    else:
+        sequences = [tokenizer.texts_to_sequences([k])[0] for k in all_window_kmers]
+
+    # 3. Determine pad length and pad all sequences in batch
+    pad_len = model.input_shape[1] if hasattr(model, 'input_shape') and isinstance(model.input_shape, tuple) and len(model.input_shape) >= 2 else max(len(s) for s in sequences)
+    from keras.preprocessing.sequence import pad_sequences as _pad
+    padded_sequences = _pad(sequences, maxlen=pad_len)
+
+    # 4. Predict entire batch at once (verbose=0 disables progress logs)
+    preds = model.predict(padded_sequences, batch_size=32, verbose=0)
+    preds = np.array(preds)
+
+    # 5. Decode predictions in batch
+    pathogen_counts = {}
+    for i in range(total_windows):
+        pred_i = preds[i]
+        if preds.ndim == 2 and preds.shape[1] > 1:
+            probabilities = pred_i.tolist()
+            label_index = int(np.argmax(probabilities))
         else:
-            model = tf.keras.models.load_model(model_path, compile=False)
-            models_cache[model_path] = model
-
-        seq = dna_sequence.strip().upper()
-        windows = [seq[i:i+window_size] for i in range(0, len(seq)-window_size+1, step_size)]
-        if not windows:
-            windows = [seq]
-
-        pathogen_counts = {}
-        total_windows = len(windows)
-        for window in windows:
-            kmers = [window[j:j+6] for j in range(len(window)-5)] if len(window) >= 6 else [window]
-            sequences = tokenizer.texts_to_sequences([" ".join(kmers)]) if hasattr(tokenizer, 'texts_to_sequences') else tokenizer.texts_to_sequences([kmers])
-            pad_len = model.input_shape[1] if hasattr(model, 'input_shape') and isinstance(model.input_shape, tuple) and len(model.input_shape) >= 2 else max(len(s) for s in sequences)
-            from keras.preprocessing.sequence import pad_sequences as _pad
-            padded_sequences = _pad(sequences, maxlen=pad_len)
-            preds = model.predict(padded_sequences)
-            preds = np.array(preds)
-            if preds.ndim == 2 and preds.shape[1] > 1:
-                probabilities = preds[0].tolist()
-                label_index = int(np.argmax(probabilities))
-            else:
-                val = float(preds.ravel()[0])
-                prob_pos = 1.0 / (1.0 + np.exp(-val)) if (val < 0 or val > 1) else val
-                probabilities = [1.0 - prob_pos, prob_pos]
-                label_index = 1 if prob_pos >= 0.5 else 0
+            val = float(pred_i[0]) if (isinstance(pred_i, (np.ndarray, list)) and len(pred_i) > 0) else float(pred_i)
+            prob_pos = 1.0 / (1.0 + np.exp(-val)) if (val < 0 or val > 1) else val
+            probabilities = [1.0 - prob_pos, prob_pos]
+            label_index = 1 if prob_pos >= 0.5 else 0
+        try:
+            label_name = label_encoder.inverse_transform([label_index])[0]
+        except Exception:
             try:
-                label_name = label_encoder.inverse_transform([label_index])[0]
+                label_name = label_encoder.classes_[label_index]
             except Exception:
-                try:
-                    label_name = label_encoder.classes_[label_index]
-                except Exception:
-                    label_name = str(label_index)
-            pathogen_counts[label_name] = pathogen_counts.get(label_name, 0) + 1
+                label_name = str(label_index)
+        pathogen_counts[label_name] = pathogen_counts.get(label_name, 0) + 1
 
-        percentages = {k: (v/total_windows)*100 for k, v in pathogen_counts.items()}
-        return {
-            "type": "dna",
-            "window_size": window_size,
-            "step_size": step_size,
-            "total_windows": total_windows,
-            "percentages_by_pathogen": percentages,
-            "raw_counts": pathogen_counts,
-            "status": "success"
-        }
+    percentages = {k: (v/total_windows)*100 for k, v in pathogen_counts.items()}
+    return {
+        "type": "dna",
+        "window_size": window_size,
+        "step_size": step_size,
+        "total_windows": total_windows,
+        "percentages_by_pathogen": percentages,
+        "raw_counts": pathogen_counts,
+        "status": "success"
+    }
+
+
+def dna_preprocess_and_predict(dna_sequence: str, model_info: Dict[str, Any]) -> Dict[str, Any]:
     """Preprocesses a DNA sequence and predicts using the k-mer model."""
     try:
         import pickle
@@ -1135,9 +1176,9 @@ def dna_preprocess_and_predict(dna_sequence: str, model_info: Dict[str, Any]) ->
             raise FileNotFoundError(f"Label encoder file not found: {le_path}")
 
         with open(tokenizer_path, 'rb') as f:
-            tokenizer = pickle.load(f)
+            tokenizer = CustomUnpickler(f).load()
         with open(le_path, 'rb') as f:
-            label_encoder = pickle.load(f)
+            label_encoder = CustomUnpickler(f).load()
 
         # Load or reuse the Keras model
         if not model_path or not os.path.exists(model_path):

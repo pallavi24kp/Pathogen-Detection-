@@ -60,7 +60,7 @@ function renderHistory(){
       <p>Date: ${new Date(item.ts).toLocaleString()}</p>
       <button class="download-item" data-id="${item.id}">Download Report</button>
     `;
-    li.querySelector('.download-item').onclick = ()=> downloadJSON(item.report, `report-${item.id}.json`)
+    li.querySelector('.download-item').onclick = ()=> downloadReportHTML(item.report)
     li.querySelector('.delete-item').onclick = (e)=> {
       e.stopPropagation()
       const id = item.id
@@ -98,6 +98,240 @@ function downloadJSON(obj, name){
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+}
+
+function downloadReportHTML(json) {
+  const summary = json.results || {};
+  const full = json.full_results || {};
+  const reportId = 'rep_' + Date.now();
+  const dateStr = new Date().toLocaleString();
+  
+  const isDna = summary.type === 'dna' || (summary.model_used && summary.model_used.includes('dna'));
+  
+  let resultSection = '';
+  if (isDna) {
+    const fullResult = full && Object.keys(full).length > 0 ? full[Object.keys(full)[0]] : null;
+    let tableRows = '';
+    if (fullResult && fullResult.percentages_by_pathogen) {
+      const sorted = Object.entries(fullResult.percentages_by_pathogen).sort((a,b) => b[1] - a[1]);
+      sorted.forEach(([pathogen, percent]) => {
+        tableRows += `<tr>
+          <td><strong>${pathogen}</strong></td>
+          <td>${percent.toFixed(2)}%</td>
+        </tr>`;
+      });
+    } else if (fullResult && fullResult.probabilities_by_label) {
+      const sorted = Object.entries(fullResult.probabilities_by_label).sort((a,b) => b[1] - a[1]);
+      sorted.forEach(([pathogen, prob]) => {
+        const percent = prob <= 1.0 ? prob * 100 : prob;
+        tableRows += `<tr>
+          <td><strong>${pathogen}</strong></td>
+          <td>${percent.toFixed(2)}%</td>
+        </tr>`;
+      });
+    }
+    
+    resultSection = `
+      <div class="card">
+        <h3>Genomic DNA Analysis Result</h3>
+        <p><strong>Primary Prediction:</strong> <span class="badge ${summary.detection === 'DETECTED' ? 'badge-danger' : 'badge-success'}">${summary.label || 'Unknown'}</span></p>
+        <p><strong>Pathogen:</strong> ${summary.pathogen || 'Unknown'}</p>
+        <p><strong>Disease Name:</strong> ${summary.disease || 'Unknown'}</p>
+        <p><strong>Notes:</strong> ${summary.notes || 'None'}</p>
+        <div style="margin-top: 15px;">
+          <h4>Sequence Probability Distribution</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Pathogen / Species</th>
+                <th>Matched Percentage</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${tableRows || `<tr><td>${summary.label}</td><td>${summary.probability}</td></tr>`}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  } else {
+    resultSection = `
+      <div class="card">
+        <h3>Microscopy/Image Classification Result</h3>
+        <p><strong>Detection Status:</strong> <span class="badge ${summary.detection === 'DETECTED' ? 'badge-danger' : 'badge-success'}">${summary.detection}</span></p>
+        <p><strong>Identified Pathogen:</strong> ${summary.label || 'Unknown'}</p>
+        <p><strong>Disease Name:</strong> ${summary.disease || 'Unknown'}</p>
+        <p><strong>Classification Probability:</strong> ${summary.probability || 'N/A'}</p>
+        <p><strong>Clinical Notes:</strong> ${summary.notes || 'None'}</p>
+      </div>
+      
+      ${summary.image_url ? `
+      <div class="card text-center">
+        <h3>Analyzed Image Sample</h3>
+        <img class="img-preview" src="${summary.image_url}" alt="Analyzed Sample Image" />
+      </div>` : ''}
+    `;
+  }
+  
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>LabAssist Clinical Diagnostic Report — ${reportId}</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      color: #2c3e50;
+      background-color: #f8f9fa;
+      margin: 0;
+      padding: 40px 20px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 40px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+      border: 1px solid #e9ecef;
+    }
+    header {
+      border-bottom: 2px solid #3498db;
+      padding-bottom: 20px;
+      margin-bottom: 30px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    header h1 {
+      margin: 0;
+      font-size: 28px;
+      color: #2c3e50;
+    }
+    .logo {
+      color: #3498db;
+      font-weight: bold;
+    }
+    .meta-info {
+      font-size: 14px;
+      color: #7f8c8d;
+      text-align: right;
+    }
+    .card {
+      background: #fdfdfd;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 25px;
+    }
+    .card h3 {
+      margin-top: 0;
+      margin-bottom: 15px;
+      color: #2c3e50;
+      border-bottom: 1px dashed #e2e8f0;
+      padding-bottom: 8px;
+    }
+    h4 {
+      margin-top: 20px;
+      margin-bottom: 10px;
+      color: #34495e;
+    }
+    .badge {
+      display: inline-block;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-weight: bold;
+      font-size: 13px;
+      text-transform: uppercase;
+    }
+    .badge-danger {
+      background-color: #fadbd8;
+      color: #c0392b;
+      border: 1px solid #f5b7b1;
+    }
+    .badge-success {
+      background-color: #d4efdf;
+      color: #27ae60;
+      border: 1px solid #a9dfbf;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    table th, table td {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 1px solid #e2e8f0;
+    }
+    table th {
+      background-color: #f1f5f9;
+      color: #475569;
+    }
+    .img-preview {
+      max-width: 100%;
+      max-height: 400px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      margin-top: 10px;
+    }
+    .text-center {
+      text-align: center;
+    }
+    footer {
+      margin-top: 40px;
+      border-top: 1px solid #e2e8f0;
+      padding-top: 20px;
+      font-size: 12px;
+      color: #94a3b8;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <div>
+        <h1><span class="logo">🧬 LabAssist</span> Clinical Report</h1>
+      </div>
+      <div class="meta-info">
+        <div><strong>Report ID:</strong> ${reportId}</div>
+        <div><strong>Date:</strong> ${dateStr}</div>
+      </div>
+    </header>
+    
+    <div class="card">
+      <h3>Sample Metadata</h3>
+      <table>
+        <tr>
+          <td><strong>Subject/Patient:</strong> Anonymous Sample</td>
+          <td><strong>Analyst:</strong> LabAssist Automated System</td>
+        </tr>
+        <tr>
+          <td><strong>Diagnostic Modality:</strong> ${isDna ? 'Genomic DNA Classification' : 'Microscopy/Cellular Image Analysis'}</td>
+          <td><strong>System Version:</strong> v1.1.0 (Offline Fallback Enabled)</td>
+        </tr>
+      </table>
+    </div>
+    
+    ${resultSection}
+    
+    <footer>
+      <p><strong>Disclaimer:</strong> This is a computer-generated diagnostic screening aid produced by the LabAssist Multimodal Pathogen Screening AI framework. It is intended for laboratory assistance and research workflows. It does not replace professional clinical evaluation or confirmatory microbiological tests.</p>
+    </footer>
+  </div>
+</body>
+</html>`;
+
+  const blob = new Blob([html], {type: 'text/html'})
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `labassist-report-${reportId}.html`
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
 }
 
 // Analysis flow
@@ -177,7 +411,7 @@ $('#backToUpload').onclick = ()=> show('upload')
 $('#downloadReport').onclick = ()=> {
   const text = document.getElementById('resultsContainer').dataset.raw
   if(!text) return alert('No report available')
-  downloadJSON(JSON.parse(text),'full_report.json')
+  downloadReportHTML(JSON.parse(text))
 }
 
 // --- Modified renderResults to fit new structure ---
@@ -352,3 +586,19 @@ function escapeHtml(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 // init
 show('home')
 renderHistory()
+
+// Clear other input when one is selected to enforce single-modality
+const imageInput = $('#imageFile');
+const dnaInput = $('#dnaFile');
+if (imageInput && dnaInput) {
+  imageInput.addEventListener('change', () => {
+    if (imageInput.files.length > 0) {
+      dnaInput.value = '';
+    }
+  });
+  dnaInput.addEventListener('change', () => {
+    if (dnaInput.files.length > 0) {
+      imageInput.value = '';
+    }
+  });
+}

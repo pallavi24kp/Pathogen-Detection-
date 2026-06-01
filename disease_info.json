@@ -2,8 +2,8 @@
   "malaria": {
     "model_path": "malaria_detection_model.h5",
     "labels": ["Parasitized", "Uninfected"],
-  "preprocess": "scale",
-  "invert_binary": false,
+    "preprocess": "scale",
+    "invert_binary": false,
     "class_info": {
       "Parasitized": {
         "disease": "Malaria",
@@ -30,30 +30,35 @@
         "pathogen": "HPV",
         "notes": "Detected Human Papillomavirus sequence."
       },
-      "human_smaco": {
+      "smaco": {
         "disease": "Human Smacovirus",
         "pathogen": "Smacovirus",
         "notes": "Detected Human Smacovirus sequence."
       },
-      "human_parvo": {
+      "parvo": {
         "disease": "Human Parvovirus",
         "pathogen": "Parvovirus B19",
         "notes": "Detected Human Parvovirus sequence."
       },
-      "JC_polyoma": {
+      "jc": {
         "disease": "JC Polyomavirus",
         "pathogen": "JC virus",
         "notes": "Detected JC Polyomavirus sequence."
       },
-      "E_coli": {
+      "ecoli": {
         "disease": "Escherichia coli",
         "pathogen": "E. coli",
         "notes": "Detected Escherichia coli sequence."
+      },
+      "human": {
+        "disease": "Healthy",
+        "pathogen": "None",
+        "notes": "Human background DNA sequence. No pathogen detected."
       }
     }
   },
   "chest_xray": {
-  "model_path": "tb_detection_model.h5",
+    "model_path": "tb_detection_model.h5",
     "labels": ["Tuberculosis", "Normal"],
     "preprocess": "scale",
     "invert_binary": true,
