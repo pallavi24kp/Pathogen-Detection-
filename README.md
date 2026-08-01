@@ -1,110 +1,132 @@
-# Multimodal Pathogen Detection & Analysis System (LabAssist)
+# Pathogen Detection & Medical AI Assistant
 
-LabAssist is a comprehensive, production-ready fullstack AI application for rapid pathogen screening and diagnostic assistance. It supports three distinct detection modalities leveraging deep learning and sequence classification:
-
-1. **Malaria Detection**: Classifies cell images from thin blood smears as *Parasitized* (Malaria) or *Uninfected*.
-2. **Tuberculosis (TB) Detection**: Identifies *Tuberculosis* vs. *Normal* chest X-rays.
-3. **DNA Sequence Classification**: Analyzes genomic sequence FASTA/raw data via sliding-window k-mer analysis to detect viral and bacterial pathogens:
-   - *Escherichia coli* (E. coli)
-   - *Human Papillomavirus* (HPV)
-   - *Human Smacovirus* (Smacovirus)
-   - *Human Parvovirus* (Parvovirus B19)
-   - *JC Polyomavirus* (JC virus)
-   - *Human Background DNA* (Healthy)
-
-The system features a clean, responsive HTML/CSS/JS web frontend that communicates with a high-performance FastAPI/Uvicorn backend. It also includes an integrated AI Chat Assistant powered by a Gemini-like RAG chatbot for treatment guidance and diagnostics question-answering.
+A multi-modal AI-powered diagnostic application for automated pathogen identification from microscopic cell images, chest X-rays, and DNA genomic sequences, coupled with an AI Medical Chatbot featuring Retrieval-Augmented Generation (RAG) and web search capabilities.
 
 ---
 
-## Architecture & Core Components
+## Key Features
 
-- **Backend (`main.py`)**: A FastAPI web server that handles requests, executes TensorFlow/Keras model inferences, performs sliding-window DNA genomic analysis, and hosts the chatbot APIs.
-- **Frontend (`frontend/`)**: An elegant, dynamic, responsive dashboard designed for clinical utility:
-  - `index.html`: Layout containing the analysis controls, results display, and interactive chat interface.
-  - `styles.css`: Custom premium styling with vibrant modern palettes, clean layouts, and micro-animations.
-  - `app.js`: Connects to backend API endpoints, handles file uploads, renders results dynamically, and maintains local report history.
-- **Models & Serialized Configurations**:
-  - `malaria_detection_model.h5` (Keras model for malaria)
-  - `tb_detection_model.h5` (Keras model for chest X-rays)
-  - `dna_kmer_classifier_model.h5` (Keras sequence classifier)
-  - `tokenizer.pkl` & `label_encoder.pkl` (Preprocessing and classification mappings for DNA sequencing)
-  - `disease_info.json`: Clinical metadata (pathogen names, treatment notes, threshold configurations) mapped to model outputs.
-- **Diagnostic & Helper Scripts (`scripts/`)**: A collection of utility scripts for inspecting models, verifying layer structures, and calibrating image-processing heuristics:
-  - `probe.py` & `inspect_model.py`: Inspect input/output shapes, model configurations, and layers.
-  - `diagnose_image.py`: Test the model-guessing heuristic on local test images.
-  - `test_model_load.py` & `test_malaria_load.py`: Verify the models load and run predictions with dummy data.
+- **Microscopy Cell Image Analysis:** Detects malaria parasites (*Plasmodium vivax*) from blood smear images.
+- **Chest X-Ray Diagnostic Engine:** Classifies chest X-rays for Tuberculosis (*Mycobacterium tuberculosis*) signs.
+- **Genomic DNA Sequence Classifier:** Performs sliding-window k-mer analysis on FASTA/FASTQ sequence files to identify pathogens (e.g., *E. coli*, *HPV*, *Parvovirus*, *Polyomavirus*, *Smacovirus*).
+- **RAG Medical Assistant:** AI chat assistant powered by Google Gemini, local medical knowledge base (`knowledge_base.txt`), and live web search capabilities (`rag_tools.py`).
+- **Interactive Web Interface:** Modern, responsive frontend dashboard (`frontend/`) for uploading samples, visualizing diagnostic probabilities, and generating downloadable lab reports.
 
-### Repository Structure
+---
+
+## Project Structure
 
 ```text
-.
-├── .gitignore                      # Git configuration & file exclusion patterns
-├── README.md                       # System documentation & quickstart guide
-├── disease_info.json               # Pathogen metadata & classification thresholds
-├── label_encoder.pkl               # DNA sequence label encoder
-├── main.py                         # FastAPI backend server
-├── malaria_detection_model.h5      # Deep learning model for Malaria detection
-├── rag_tools.py                    # RAG chatbot web-search utility
-├── requirements.txt                # Python dependencies list
-├── tb_detection_model.h5           # Deep learning model for Tuberculosis detection
-├── tokenizer.pkl                   # DNA sequence tokenization mapping
+Pathogen_detection/
 │
-├── frontend/                       # Web interface assets
-│   ├── app.js                      # Application controller & API integration
-│   ├── index.html                  # Clinical dashboard template
-│   ├── styles.css                  # Modern responsive dashboard styles
-│   └── images/                     # Static styling image files
+├── main.py                     # Primary FastAPI backend application
+├── rag_tools.py                # Web search scraper and RAG helper tools
+├── disease_info.json           # Disease metadata, labels, and model mappings
+├── knowledge_base.txt          # Local RAG context documentation
+├── requirements.txt            # Python dependencies
+├── .env.example                # Environment variables template
+├── .gitignore                  # Git ignore rules (ignores .env, *.h5, *.pkl)
 │
-├── scripts/                        # Model diagnostics and helper utilities
-│   ├── diagnose_image.py           # Model-guessing heuristic tester
-│   ├── inspect_h5.py               # inspect H5 structure and metadata
-│   ├── inspect_model.py            # inspect model weights, layers, shapes
-│   ├── probe.py                    # Probe model properties
-│   ├── test_malaria_load.py        # Malaria model prediction testing
-│   └── test_model_load.py          # Tuberculosis model architecture testing
+├── frontend/                   # Main Web Dashboard UI
+│   ├── index.html              # Frontend application page
+│   ├── styles.css              # Custom styling
+│   └── app.js                  # Frontend logic & API fetch requests
 │
-└── Test images and sequence/       # Clinical test samples (microscopy/FASTAs)
+├── gemini-chatbot/             # Standalone React + Vite Gemini Chatbot
+│   ├── App.tsx                 # React application component
+│   ├── components/             # UI components
+│   └── package.json            # Node.js dependencies
+│
+└── Test images and sequence/   # Test samples (Microscopy PNGs, X-Rays, FASTA files)
 ```
 
 ---
 
-## Technical Solutions & Robustness Improvements
+## Prerequisites
 
-To run successfully in local developer environments, the following robustness fixes and features are integrated:
-
-1. **API Quota Graceful Fallback**: If the configured Gemini API key in `.env` is rate-limited (`429 ResourceExhausted`) or fails to connect, the chat assistant automatically degrades gracefully to an offline clinician assistant, supplying mock diagnostic information without crashing the interface.
-2. **Self-Contained Report History with Image Serialization**: Images uploaded for analysis are resized and encoded into Base64 data URLs on the backend. This allows them to be saved directly in the frontend's local report history (`localStorage`), ensuring that clicking on a historical report reconstructs the full analysis with its original image, even across browser restarts.
-3. **Mutual-Exclusive Upload Validation**: The frontend prevents submitting overlapping modalities by clearing the image input when a DNA sequence is selected, and vice versa.
-4. **Improved Global Pathogen Mapping**: The tolerant mapping algorithm searches through the nested `class_info` of all configured models in `disease_info.json` rather than performing a flat lookup, resolving mapping bugs for diagnostic classifications.
+- **Python 3.10+**
+- **Node.js 18+** (optional, for running the standalone Vite `gemini-chatbot` app)
+- **Google Gemini API Key** (optional, for live Gemini chat functionality; falls back to local assistant if not provided)
 
 ---
 
-## Quickstart Guide (Windows PowerShell)
+## Installation & Setup
 
-### 1. Set Up a Virtual Environment
-Create and activate a virtual environment to manage dependencies:
+### 1. Environment Setup
+
+Clone the repository and create a virtual environment:
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 ```
 
-### 2. Install Dependencies
-Install all required libraries including FastAPI, Uvicorn, TensorFlow, Pillow, and Scikit-Learn:
+Install backend dependencies:
+
 ```powershell
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
-### 3. Start the Application Server
-Run the FastAPI application locally:
-```powershell
-python -m uvicorn main:app --port 8000 --host 127.0.0.1
+### 2. Configure Environment Variables
+
+Create a `.env` file in the project root (copied from `.env.example`):
+
+```ini
+GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-### 4. Access the Web Interface
-Open your web browser and navigate to:
+### 3. Model Files Placement
+
+Model binaries (`*.h5`) and pickled encoders (`*.pkl`) are excluded from Git due to file size limits. Place your trained model files in the project root:
+
+- `malaria_detection_model.h5`
+- `tb_detection_model.h5`
+- `dna_kmer_classifier_model.h5`
+- `tokenizer.pkl`
+- `label_encoder.pkl`
+
+*(Note: If a model file is missing at runtime, the API gracefully handles the request and surfaces a clear status message).*
+
+---
+
+## Running the Application
+
+### Start Backend & Web UI
+
+Start the FastAPI application with Uvicorn:
+
+```powershell
+python -m uvicorn main:app --reload --host 127.0.0.1 --port 8000
 ```
-http://127.0.0.1:8000/
-```
-The static files from the `frontend/` directory are served automatically.
-- **Root URL `/`**: Serves the main dashboard (`index.html`).
-- **Static files `/static/*`**: Serves stylesheets and JS logic mounted from the `frontend` directory.
+
+Open your browser and navigate to:
+- **Web Dashboard:** `http://127.0.0.1:8000/`
+- **Interactive API Documentation:** `http://127.0.0.1:8000/docs`
+
+---
+
+## API Endpoints Overview
+
+| Endpoint | Method | Description |
+| :--- | :--- | :--- |
+| `GET /` | `GET` | Serves the main static web frontend (`frontend/index.html`) |
+| `POST /predict` | `POST` | Accepts an image file (`file`) and optional `model_key` (`malaria` / `chest_xray`) to return diagnostic prediction |
+| `POST /analyze_multi` | `POST` | Multi-modal endpoint accepting image file or DNA FASTA file |
+| `POST /analyze_dna` | `POST` | Accepts a FASTA/FASTQ sequence file for sliding window k-mer pathogen classification |
+| `POST /map` | `POST` | Debug helper to look up disease metadata for a given label |
+| `POST /api/chat` | `POST` | Streaming medical chat assistant powered by Gemini RAG & DuckDuckGo search |
+
+---
+
+## Testing
+
+Sample test data is available under `Test images and sequence/`:
+- **Malaria Microscopy:** `mra inf 10.png`, `mra u1.png`
+- **Chest X-Ray:** `tb 2.jpg`, `tb n1.png`
+- **DNA FASTA:** `Ecoli.fasta`, `Jc.fasta`, `human and hpv.fasta`
+
+---
+
+## License
+
+This project is open-source and intended for diagnostic research and demonstration purposes.

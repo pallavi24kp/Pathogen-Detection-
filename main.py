@@ -17,13 +17,6 @@ from google.generativeai.types import HarmCategory, HarmBlockThreshold
 from dotenv import load_dotenv
 import asyncio
 from rag_tools import search_web
-import pickle
-
-class CustomUnpickler(pickle.Unpickler):
-    def find_class(self, module, name):
-        if 'keras.src.legacy' in module:
-            module = module.replace('keras.src.legacy', 'keras')
-        return super().find_class(module, name)
 
 app = FastAPI(title="Malaria Detection API")
 
@@ -128,41 +121,62 @@ def map_label_to_disease(label_name: Optional[str], label_id: Optional[int], lab
     """Map a predicted label (name or id) to the `disease_info` mapping.
     Returns a dict with keys:
       - info: {disease, pathogen}
-      - matched_key: the key in the model's class_info that matched (or None)
-    The lookup is tolerant: checks for exact match or case-insensitive match in all configured models.
+      - matched_key: the key in `disease_info` that matched (or None)
+    The lookup is tolerant: checks class_info mappings, exact match, case-insensitive match.
     """
     info = {"disease": "Unknown", "pathogen": "Unknown"}
     matched = None
     try:
-        lookup_keys = []
         if label_name is not None:
-            lookup_keys.append(label_name.strip())
-        if label_id is not None and labels and label_id < len(labels):
-            lookup_keys.append(labels[label_id].strip())
-
-        # Iterate over all models in disease_info
-        for model_key, model_data in disease_info.items():
-            if not isinstance(model_data, dict):
-                continue
-            class_info = model_data.get('class_info', {})
-            for key in lookup_keys:
-                # Direct match
-                if key in class_info:
-                    info = class_info[key]
-                    matched = key
-                    break
-                # Case-insensitive match
-                for class_label, class_data in class_info.items():
-                    if class_label.lower() == key.lower():
-                        info = class_data
-                        matched = class_label
+            norm = label_name.strip()
+            # 1. Search class_info sub-dictionaries inside all disease_info models
+            for model_key, model_cfg in disease_info.items():
+                if isinstance(model_cfg, dict) and "class_info" in model_cfg:
+                    cinfo = model_cfg["class_info"]
+                    if norm in cinfo:
+                        info = cinfo[norm]
+                        matched = norm
                         break
-                if matched:
-                    break
-            if matched:
-                break
-    except Exception as e:
-        print(f"Error mapping label to disease: {e}")
+                    for k, v in cinfo.items():
+                        if k.lower() == norm.lower():
+                            info = v
+                            matched = k
+                            break
+                    if matched:
+                        break
+
+            # 2. Search top-level disease_info keys if not matched yet
+            if matched is None:
+                if norm in disease_info:
+                    info = disease_info[norm]
+                    matched = norm
+                else:
+                    folded = norm.casefold()
+                    if folded in disease_info_key_map:
+                        matched = disease_info_key_map[folded]
+                        info = disease_info[matched]
+                    else:
+                        lower_lookup = norm.lower()
+                        for k in disease_info.keys():
+                            if k.lower() == lower_lookup:
+                                matched = k
+                                info = disease_info[k]
+                                break
+
+        # 3. Fallback to labels[label_id] if available
+        if matched is None and label_id is not None and labels:
+            try:
+                fallback_label = labels[label_id]
+                for model_key, model_cfg in disease_info.items():
+                    if isinstance(model_cfg, dict) and "class_info" in model_cfg:
+                        cinfo = model_cfg["class_info"]
+                        if fallback_label in cinfo:
+                            info = cinfo[fallback_label]
+                            matched = fallback_label
+                            break
+            except Exception:
+                pass
+    except Exception:
         info = {"disease": "Unknown", "pathogen": "Unknown"}
         matched = None
 
@@ -283,17 +297,11 @@ async def chat_endpoint(req: ChatRequest):
                         await asyncio.sleep(0.02)
 
             except Exception as e:
-                print(f"Error during Gemini API call: {e}")
-                traceback.print_exc()
-                warning = "⚠️ Note: Gemini API quota exceeded or connection failed. Falling back to local offline assistant.\n\n"
-                yield warning.encode('utf-8')
-                
-                mock_text = f"Hello! As the cloud-based Gemini Assistant is currently unavailable (rate-limited or offline), I am running in offline mode.\n\nRegarding your query: '{prompt}'\n\nFor general clinical guidance, please refer to the knowledge base or consult a specialist. LabAssist is ready to accept microscopy images (malaria thin smears, TB chest X-rays) or DNA sequences for automated diagnostic classification."
-                chunk_size = 15
-                for i in range(0, len(mock_text), chunk_size):
-                    chunk = mock_text[i : i + chunk_size]
-                    await asyncio.sleep(0.04)
-                    yield chunk.encode("utf-8")
+                error_message = f"Gemini API unavailable ({e}). Falling back to local assistant response:\n"
+                print(error_message)
+                yield error_message.encode('utf-8')
+                async for chunk in mock_stream_response(prompt):
+                    yield chunk
 
         return StreamingResponse(stream_generator(), media_type="text/plain; charset=utf-8")
 
@@ -503,50 +511,67 @@ async def predict(file: UploadFile = File(...), model_key: Optional[str] = None,
     return JSONResponse(content={"results": results})
 
 
-async def _perform_predictions_for_image(pil_image: Image.Image, configured_models: Dict[str, Any], preprocess_override: Optional[str] = None) -> Dict[str, Any]:
-    """Helper that runs all configured models on a PIL image and returns the results dict.
-    This encapsulates the prediction loop so it can be reused by multiple endpoints (e.g., /analyze_multi).
-    """
-    results: Dict[str, Any] = {}
-
-    # Helper to load a keras model (per-path) and cache it
-    def load_keras_model(path: str):
-        if path in models_cache:
-            return models_cache[path]
+def load_keras_model(path: str):
+    """Helper to load a keras model (per-path) and cache it with safe fallbacks."""
+    if path in models_cache:
+        return models_cache[path]
+    try:
+        import tensorflow as tf
+        
+        if MODEL_DEBUG:
+            print(f"MODEL_DEBUG: Loading model: {os.path.basename(path)}")
+        
         try:
-            import tensorflow as tf
+            m = tf.keras.models.load_model(path, compile=False)
             
-            # Load model with safe fallback for architecture issues
+            # Ensure the model is built by calling build() if it hasn't been built yet
+            if not m.built:
+                if hasattr(m, 'input_shape') and m.input_shape:
+                    m.build(m.input_shape)
+                if MODEL_DEBUG:
+                    print(f"MODEL_DEBUG: Model built with input shape: {m.input_shape}")
+            
             if MODEL_DEBUG:
-                print(f"MODEL_DEBUG: Loading model: {os.path.basename(path)}")
+                print(f"MODEL_DEBUG: Model loaded successfully with standard load")
+                print(f"MODEL_DEBUG: Model input shape: {m.input_shape}")
+                print(f"MODEL_DEBUG: Model output shape: {m.output_shape}")
+        
+        except Exception as load_err:
+            if MODEL_DEBUG:
+                print(f"MODEL_DEBUG: Standard load failed: {load_err}")
+                print(f"MODEL_DEBUG: Attempting weights-only load / JSON patch fallback...")
             
             try:
-                m = tf.keras.models.load_model(path, compile=False)
-                
-                # Ensure the model is built by calling build() if it hasn't been built yet
-                if not m.built:
-                    # Get the input shape from the model config
-                    if hasattr(m, 'input_shape') and m.input_shape:
-                        m.build(m.input_shape)
-                    if MODEL_DEBUG:
-                        print(f"MODEL_DEBUG: Model built with input shape: {m.input_shape}")
-                
-                if MODEL_DEBUG:
-                    print(f"MODEL_DEBUG: Model loaded successfully with standard load")
-                    print(f"MODEL_DEBUG: Model input shape: {m.input_shape}")
-                    print(f"MODEL_DEBUG: Model output shape: {m.output_shape}")
-            
-            except Exception as load_err:
-                # Some saved models have architecture issues when loading
-                # Try loading just the weights into a fresh model structure
-                if MODEL_DEBUG:
-                    print(f"MODEL_DEBUG: Standard load failed: {load_err}")
-                    print(f"MODEL_DEBUG: Attempting weights-only load with custom architecture...")
-                
+                import h5py
+                loaded_via_json = False
                 try:
-                    import h5py
-                    # Try to determine model architecture from filename or config
-                    # For EfficientNet models, build a fresh model and load weights
+                    with h5py.File(path, 'r') as f:
+                        config_raw = f.attrs.get('model_config')
+                        if isinstance(config_raw, bytes):
+                            config_raw = config_raw.decode('utf-8')
+                    if config_raw:
+                        config_dict = json.loads(config_raw)
+                        def fix_config(obj):
+                            if isinstance(obj, dict):
+                                if obj.get('class_name') == 'DTypePolicy' and isinstance(obj.get('config'), dict):
+                                    return obj['config'].get('name', 'float32')
+                                if 'batch_shape' in obj:
+                                    obj['batch_input_shape'] = obj.pop('batch_shape')
+                                return {k: fix_config(v) for k, v in obj.items()}
+                            elif isinstance(obj, list):
+                                return [fix_config(x) for x in obj]
+                            return obj
+                        fixed = fix_config(config_dict)
+                        m = tf.keras.models.model_from_json(json.dumps(fixed))
+                        m.load_weights(path)
+                        loaded_via_json = True
+                        if MODEL_DEBUG:
+                            print("MODEL_DEBUG: Loaded model successfully via patched JSON + load_weights")
+                except Exception as json_err:
+                    if MODEL_DEBUG:
+                        print(f"MODEL_DEBUG: Patched JSON load failed: {json_err}")
+
+                if not loaded_via_json:
                     if 'efficientnet' in path.lower():
                         base_model = tf.keras.applications.EfficientNetB0(
                             include_top=False,
@@ -557,28 +582,40 @@ async def _perform_predictions_for_image(pil_image: Image.Image, configured_mode
                         x = tf.keras.layers.GlobalAveragePooling2D()(x)
                         x = tf.keras.layers.Dense(2, activation='softmax')(x)
                         m = tf.keras.Model(inputs=base_model.input, outputs=x)
-                        
-                        # Try to load weights
-                        try:
-                            m.load_weights(path)
-                            if MODEL_DEBUG:
-                                print("MODEL_DEBUG: Loaded weights into fresh EfficientNet architecture")
-                        except Exception:
-                            if MODEL_DEBUG:
-                                print("MODEL_DEBUG: Weights load failed, using random initialization")
+                        m.load_weights(path)
+                        if MODEL_DEBUG:
+                            print("MODEL_DEBUG: Loaded weights into fresh EfficientNet architecture")
+                    elif 'malaria' in path.lower() or 'resnet' in path.lower():
+                        base_model = tf.keras.applications.ResNet50(
+                            include_top=False,
+                            weights=None,
+                            input_shape=(128, 128, 3)
+                        )
+                        x = tf.keras.layers.GlobalAveragePooling2D()(base_model.output)
+                        x = tf.keras.layers.Dense(1, activation='sigmoid')(x)
+                        m = tf.keras.Model(inputs=base_model.input, outputs=x)
+                        m.load_weights(path)
+                        if MODEL_DEBUG:
+                            print("MODEL_DEBUG: Loaded weights into fresh ResNet50 + Dense(1) architecture")
                     else:
-                        # For other models, re-raise the original error
                         raise load_err
-                
-                except Exception as fallback_err:
-                    if MODEL_DEBUG:
-                        print(f"MODEL_DEBUG: Fallback also failed: {fallback_err}")
-                    raise load_err
+            
+            except Exception as fallback_err:
+                if MODEL_DEBUG:
+                    print(f"MODEL_DEBUG: Fallback also failed: {fallback_err}")
+                raise load_err
 
-            models_cache[path] = m
-            return m
-        except Exception as e:
-            raise
+        models_cache[path] = m
+        return m
+    except Exception as e:
+        raise
+
+
+async def _perform_predictions_for_image(pil_image: Image.Image, configured_models: Dict[str, Any], preprocess_override: Optional[str] = None) -> Dict[str, Any]:
+    """Helper that runs all configured models on a PIL image and returns the results dict.
+    This encapsulates the prediction loop so it can be reused by multiple endpoints (e.g., /analyze_multi).
+    """
+    results: Dict[str, Any] = {}
 
     for key, info in configured_models.items():
         path = info.get('model_path')
@@ -898,7 +935,7 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
                 return JSONResponse(content={"error": f"DNA analysis failed: {dna_pred['error']}"}, status_code=500)
             # Build JSON result for frontend
             result = {
-                "detection": "DETECTED" if dna_pred.get('label', '').lower() not in ('human', 'healthy', 'normal', 'none', 'unknown') else "NOT DETECTED",
+                "detection": "DETECTED" if dna_pred.get('label', '').lower() == 'pathogenic' else "NOT DETECTED",
                 "label": dna_pred.get('label', 'Unknown'),
                 "probability": f"{max(dna_pred.get('probabilities', [0]))*100:.2f}%",
                 "disease": dna_pred.get('disease', 'Unknown'),
@@ -920,24 +957,6 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
             src_image = Image.open(io.BytesIO(contents)).convert('RGB')
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid image file")
-
-        # Convert contents to base64 for returning in summary (resized slightly to save space)
-        import base64
-        try:
-            img_byte_arr = io.BytesIO()
-            max_size = 500
-            if src_image.width > max_size or src_image.height > max_size:
-                # create a copy to avoid mutating the original image used for prediction
-                thumb = src_image.copy()
-                thumb.thumbnail((max_size, max_size))
-                thumb.save(img_byte_arr, format='JPEG', quality=80)
-            else:
-                src_image.save(img_byte_arr, format='JPEG', quality=80)
-            encoded_image = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
-            image_url = f"data:image/jpeg;base64,{encoded_image}"
-        except Exception as encode_err:
-            print(f"Error encoding image to base64: {encode_err}")
-            image_url = None
 
         # Reload disease_info.json
         try:
@@ -1011,7 +1030,7 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
             else:
                 # DNA model detection logic
                 if first.get('type') == 'dna' or (summary_key and 'dna' in summary_key):
-                    if label and label.lower() not in ('human', 'healthy', 'normal', 'none', 'unknown'):
+                    if label.lower() == 'pathogenic':
                         detection = 'DETECTED'
                 # Image model detection logic
                 else:
@@ -1049,8 +1068,7 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
                 'preprocess_used': first.get('preprocess_used'),
                 'notes': first.get('notes') or '',
                 'status': 'error' if is_error else 'success',
-                'error': first.get('error') if is_error else None,
-                'image_url': image_url if (image_file or file) else None
+                'error': first.get('error') if is_error else None
             }
 
     # Return both a legacy-friendly `results` summary and the full detailed results
@@ -1063,11 +1081,31 @@ async def analyze_multi(image_file: Optional[UploadFile] = File(None), file: Opt
 
 
 
+def load_pickle_with_compat(filepath: str):
+    """Load a pickle file with backward compatibility aliases for legacy Keras module paths."""
+    import sys
+    import pickle
+    try:
+        import keras
+        if 'keras.src.legacy' not in sys.modules:
+            class DummyModule:
+                pass
+            legacy_mod = DummyModule()
+            legacy_mod.preprocessing = getattr(keras, 'preprocessing', None)
+            sys.modules['keras.src.legacy'] = legacy_mod
+            sys.modules['keras.src.legacy.preprocessing'] = getattr(keras, 'preprocessing', None)
+            if hasattr(keras, 'preprocessing') and hasattr(keras.preprocessing, 'text'):
+                sys.modules['keras.src.legacy.preprocessing.text'] = keras.preprocessing.text
+    except Exception:
+        pass
+
+    with open(filepath, 'rb') as f:
+        return pickle.load(f)
+
+
 def sliding_window_dna_analysis(dna_sequence: str, model_info: Dict[str, Any], window_size: int = 200, step_size: int = 50):
     """Analyze DNA using sliding windows, aggregate pathogen predictions."""
-    import pickle
     import tensorflow as tf
-    from keras.preprocessing.sequence import pad_sequences
     import numpy as np
 
     base_dir = os.path.dirname(__file__)
@@ -1078,53 +1116,30 @@ def sliding_window_dna_analysis(dna_sequence: str, model_info: Dict[str, Any], w
     le_path = os.path.join(base_dir, le_cfg) if le_cfg else None
     model_path = os.path.join(base_dir, model_cfg) if model_cfg else None
 
-    with open(tokenizer_path, 'rb') as f:
-        tokenizer = CustomUnpickler(f).load()
-    with open(le_path, 'rb') as f:
-        label_encoder = CustomUnpickler(f).load()
-    if model_path in models_cache:
-        model = models_cache[model_path]
-    else:
-        model = tf.keras.models.load_model(model_path, compile=False)
-        models_cache[model_path] = model
+    tokenizer = load_pickle_with_compat(tokenizer_path)
+    label_encoder = load_pickle_with_compat(le_path)
+    model = load_keras_model(model_path)
 
     seq = dna_sequence.strip().upper()
     windows = [seq[i:i+window_size] for i in range(0, len(seq)-window_size+1, step_size)]
     if not windows:
         windows = [seq]
 
+    pathogen_counts = {}
     total_windows = len(windows)
-    
-    # 1. Pre-generate all kmers strings for windows
-    all_window_kmers = []
     for window in windows:
         kmers = [window[j:j+6] for j in range(len(window)-5)] if len(window) >= 6 else [window]
-        all_window_kmers.append(" ".join(kmers))
-
-    # 2. Map all sequences to tokens in one go
-    if hasattr(tokenizer, 'texts_to_sequences'):
-        sequences = tokenizer.texts_to_sequences(all_window_kmers)
-    else:
-        sequences = [tokenizer.texts_to_sequences([k])[0] for k in all_window_kmers]
-
-    # 3. Determine pad length and pad all sequences in batch
-    pad_len = model.input_shape[1] if hasattr(model, 'input_shape') and isinstance(model.input_shape, tuple) and len(model.input_shape) >= 2 else max(len(s) for s in sequences)
-    from keras.preprocessing.sequence import pad_sequences as _pad
-    padded_sequences = _pad(sequences, maxlen=pad_len)
-
-    # 4. Predict entire batch at once (verbose=0 disables progress logs)
-    preds = model.predict(padded_sequences, batch_size=32, verbose=0)
-    preds = np.array(preds)
-
-    # 5. Decode predictions in batch
-    pathogen_counts = {}
-    for i in range(total_windows):
-        pred_i = preds[i]
+        sequences = tokenizer.texts_to_sequences([" ".join(kmers)]) if hasattr(tokenizer, 'texts_to_sequences') else tokenizer.texts_to_sequences([kmers])
+        pad_len = model.input_shape[1] if hasattr(model, 'input_shape') and isinstance(model.input_shape, tuple) and len(model.input_shape) >= 2 else max(len(s) for s in sequences)
+        from keras.preprocessing.sequence import pad_sequences as _pad
+        padded_sequences = _pad(sequences, maxlen=pad_len)
+        preds = model.predict(padded_sequences)
+        preds = np.array(preds)
         if preds.ndim == 2 and preds.shape[1] > 1:
-            probabilities = pred_i.tolist()
+            probabilities = preds[0].tolist()
             label_index = int(np.argmax(probabilities))
         else:
-            val = float(pred_i[0]) if (isinstance(pred_i, (np.ndarray, list)) and len(pred_i) > 0) else float(pred_i)
+            val = float(preds.ravel()[0])
             prob_pos = 1.0 / (1.0 + np.exp(-val)) if (val < 0 or val > 1) else val
             probabilities = [1.0 - prob_pos, prob_pos]
             label_index = 1 if prob_pos >= 0.5 else 0
@@ -1175,28 +1190,10 @@ def dna_preprocess_and_predict(dna_sequence: str, model_info: Dict[str, Any]) ->
         if not le_path or not os.path.exists(le_path):
             raise FileNotFoundError(f"Label encoder file not found: {le_path}")
 
-        with open(tokenizer_path, 'rb') as f:
-            tokenizer = CustomUnpickler(f).load()
-        with open(le_path, 'rb') as f:
-            label_encoder = CustomUnpickler(f).load()
+        tokenizer = load_pickle_with_compat(tokenizer_path)
+        label_encoder = load_pickle_with_compat(le_path)
 
-        # Load or reuse the Keras model
-        if not model_path or not os.path.exists(model_path):
-            raise FileNotFoundError(f"DNA model file not found: {model_path}")
-
-        if model_path in models_cache:
-            model = models_cache[model_path]
-            if MODEL_DEBUG:
-                print(f"MODEL_DEBUG: Using cached DNA model for {model_path}")
-        else:
-            try:
-                model = tf.keras.models.load_model(model_path, compile=False)
-                if MODEL_DEBUG:
-                    print(f"MODEL_DEBUG: Loaded DNA model from {model_path}")
-            except Exception as load_err:
-                # Surface the load error with context
-                raise RuntimeError(f"Failed to load DNA model at '{model_path}': {load_err}")
-            models_cache[model_path] = model
+        model = load_keras_model(model_path)
 
         # --- Preprocess DNA sequence into k-mers and numeric sequences ---
         def get_kmers(sequence, k=6):
@@ -1284,7 +1281,17 @@ async def analyze_dna(dna_file: UploadFile = File(...)):
     The file should contain a raw DNA sequence (e.g., from a FASTA file).
     """
     contents = await dna_file.read()
-    dna_sequence = contents.decode('utf-8').strip()
+    try:
+        decoded_contents = contents.decode('utf-8').strip()
+        lines = decoded_contents.split('\n')
+        if lines and lines[0].startswith('>'):
+            dna_sequence = "".join(lines[1:]).replace('\n', '').replace('\r', '')
+        elif lines and lines[0].startswith('@'):
+            dna_sequence = lines[1] if len(lines) > 1 else ""
+        else:
+            dna_sequence = decoded_contents.replace('\n', '').replace('\r', '')
+    except Exception:
+        dna_sequence = contents.decode('utf-8', errors='ignore').strip().replace('\n', '').replace('\r', '')
 
     # Reload disease_info.json on each request to pick up config changes without server restart
     try:

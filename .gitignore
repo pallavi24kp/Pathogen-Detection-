@@ -1,42 +1,27 @@
-# Python
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.Python
+# Environment & Secrets
+.env
+.env.*
+*.env
+*.env.local
 
-
-
-
-# VS Code
-.vscode/
-
-# Mac
-.DS_Store
-
-# Logs
-*.log
-
-# Byte-compiled / optimized
-*.pyc
-
-# Virtualenv
-.venv/
-
-# model checkpoints (if you want to keep yours out of repo)
-
-__pycache__/
-nul
-.vscode/
+# Machine Learning Models & Large Artifacts
 *.h5
 *.pkl
+*.pb
+*.onnx
+*.pt
+*.pth
 
-# Secrets and environment variables
-.env
-.env.local
-.env.production
-.env.development
-.env.staging
-.env*
-*.env
-**/.env*
+# Python Bytecode & Environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+
+# IDE & OS Artifacts
+.vscode/
+.idea/
+.DS_Store
+nul
