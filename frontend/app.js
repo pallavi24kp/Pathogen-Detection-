@@ -445,22 +445,23 @@ function renderResults(json){
   const detectionCard = $('#result-detection').closest('.result-section');
   const detectionEl = $('#result-detection');
   const labelEl = $('#result-label');
-  if (summary.type === 'dna') {
-    // Hide detection/probability card for DNA input
-    if (detectionCard) detectionCard.style.display = 'none';
+
+  if (detectionCard) detectionCard.style.display = '';
+  if (detectionEl) {
+    const isDetected = (summary.detection || '').toUpperCase() === 'DETECTED';
+    const badgeStyle = isDetected 
+      ? 'background: #fadbd8; color: #c0392b; border: 1px solid #f5b7b1; padding: 4px 10px; border-radius: 12px; font-weight: bold;'
+      : 'background: #d4efdf; color: #27ae60; border: 1px solid #a9dfbf; padding: 4px 10px; border-radius: 12px; font-weight: bold;';
+    detectionEl.innerHTML = `Detection Status: <span style="${badgeStyle}">${summary.detection || defaultData.detection}</span> (${summary.probability || 'N/A'})`;
   } else {
-    // Show detection/probability card for image input
-    if (detectionCard) detectionCard.style.display = '';
-    if (detectionEl) {
-      detectionEl.innerHTML = `Detection: <b>${summary.detection || defaultData.detection}</b>`;
-    } else {
-      console.error('ERROR: result-detection element not found!');
-    }
-    if (labelEl) {
-      labelEl.textContent = `Identified Pathogen: ${summary.label || defaultData.label}`
-    } else {
-      console.error('ERROR: result-label element not found!');
-    }
+    console.error('ERROR: result-detection element not found!');
+  }
+  if (labelEl) {
+    const organism = summary.pathogen && summary.pathogen !== 'Unknown' ? summary.pathogen : (summary.label || defaultData.label);
+    const diseaseName = summary.disease && summary.disease !== 'Unknown' ? ` (${summary.disease})` : '';
+    labelEl.innerHTML = `Identified Pathogen / Organism: <strong>${organism}</strong>${diseaseName}`;
+  } else {
+    console.error('ERROR: result-label element not found!');
   }
 
   // 2. Image and DNA Analysis

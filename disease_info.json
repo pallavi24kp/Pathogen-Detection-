@@ -61,7 +61,7 @@
     "model_path": "tb_detection_model.h5",
     "labels": ["Tuberculosis", "Normal"],
     "preprocess": "scale",
-    "invert_binary": true,
+    "invert_binary": false,
     "thresholds": { "Tuberculosis": 0.4 },
     "class_info": {
       "Tuberculosis": {

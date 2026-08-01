@@ -25,3 +25,5 @@ ENV/
 .idea/
 .DS_Store
 nul
+.vercel
+scratch/
